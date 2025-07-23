@@ -27,7 +27,7 @@ function App() {
     <div className="min-h-screen bg-gradient-to-br from-purple-100 to-blue-100 flex flex-col items-center justify-start py-10 px-4">
       <header className="w-full max-w-2xl mx-auto text-center mb-10">
         <h1 className="text-4xl md:text-5xl font-extrabold text-purple-800 mb-2 drop-shadow-lg">
-          🤖 UMD Professor Analyzer
+          UMD Professor Analyzer
         </h1>
         <p className="text-lg md:text-xl text-gray-700 mb-6">
           Search, analyze, and discover the best professors at UMD with real data, reviews, and AI-powered insights.
