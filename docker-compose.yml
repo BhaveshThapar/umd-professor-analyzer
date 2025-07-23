@@ -1,0 +1,54 @@
+version: '3.9'
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: umdprof
+      POSTGRES_PASSWORD: umdprof
+      POSTGRES_DB: umdprof
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - umdnet
+
+  backend:
+    build: ./backend
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/umdprof
+      SPRING_DATASOURCE_USERNAME: umdprof
+      SPRING_DATASOURCE_PASSWORD: umdprof
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+    networks:
+      - umdnet
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - umdnet
+
+  scrapers:
+    build: ./scrapers
+    depends_on:
+      - db
+    networks:
+      - umdnet
+
+  nlp_service:
+    build: ./nlp_service
+    ports:
+      - "8000:8000"
+    networks:
+      - umdnet
+
+networks:
+  umdnet:
+    driver: bridge
