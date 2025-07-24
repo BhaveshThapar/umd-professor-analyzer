@@ -39,6 +39,7 @@ services:
     build: ./scrapers
     depends_on:
       - db
+      - selenium
     networks:
       - umdnet
 
@@ -46,6 +47,16 @@ services:
     build: ./nlp_service
     ports:
       - "8000:8000"
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+    networks:
+      - umdnet
+
+  selenium:
+    image: seleniarm/standalone-chromium:latest
+    ports:
+      - "4444:4444"
+    shm_size: 2g
     networks:
       - umdnet
 

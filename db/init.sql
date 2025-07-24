@@ -1,6 +1,6 @@
 CREATE TABLE professor (
   id SERIAL PRIMARY KEY,
-  name TEXT NOT NULL,
+  name TEXT UNIQUE,
   department TEXT,
   avg_planetterp_gpa FLOAT,
   avg_rating FLOAT

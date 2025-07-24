@@ -8,6 +8,7 @@ import requests
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
 
 load_dotenv()
 
@@ -88,8 +89,10 @@ def scrape_rmp(prof_name):
     options.add_argument('--headless')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
-    options.binary_location = os.getenv("CHROME_BIN", "/usr/bin/chromium-browser")
-    driver = webdriver.Chrome(options=options)
+    driver = webdriver.Remote(
+        command_executor='http://selenium:4444/wd/hub',
+        options=options
+    )
     search_url = f"https://www.ratemyprofessors.com/search/professors/1112?q={prof_name.replace(' ', '%20')}"
     driver.get(search_url)
     soup = BeautifulSoup(driver.page_source, "html.parser")
@@ -121,12 +124,13 @@ def scrape_rmp(prof_name):
     print(f"Fetched and stored {len(reviews)} RMP reviews for {prof_name}")
     driver.quit()
 
-if __name__ == "__main__":
+def main():
+    print('sys.argv:', sys.argv)
     if len(sys.argv) < 3:
         print("Usage: python main.py [reddit|coursicle|rmp] [professor name]")
         sys.exit(1)
-    source = sys.argv[1]
-    prof_name = sys.argv[2]
+    source = sys.argv[1].strip().lower()
+    prof_name = " ".join(sys.argv[2:]).strip()
     if source == "reddit":
         scrape_reddit(prof_name)
     elif source == "coursicle":
@@ -134,4 +138,7 @@ if __name__ == "__main__":
     elif source == "rmp":
         scrape_rmp(prof_name)
     else:
-        print("Unknown source.") 
+        print(f"Unknown source: {source}")
+
+if __name__ == "__main__":
+    main() 
