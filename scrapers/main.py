@@ -42,6 +42,50 @@ def store_review(cur, professor_id, source, text, semester):
         VALUES (%s, %s, %s, %s, %s)
     """, (professor_id, source, text, semester, datetime.now()))
 
+def is_likely_review(submission):
+    """
+    Determine if a Reddit submission is likely a review (vs question/comparison/mention)
+    
+    This filtering logic is compatible with any deployment platform including Vercel.
+    It runs during scraping, not at request time.
+    """
+    title = submission.title.lower()
+    body = submission.selftext.lower()
+    
+    # Filter out questions
+    if '?' in title:
+        return False
+    
+    # Filter out comparison posts (check both title and body)
+    comparison_keywords = ['vs', ' or ', 'between']
+    combined_text_lower = title + ' ' + body
+    if any(keyword in combined_text_lower for keyword in comparison_keywords):
+        return False
+    
+    # Filter out posts about incidents/policies
+    incident_keywords = ['cheating', 'academic integrity', 'violation', 'caught']
+    if any(keyword in title for keyword in incident_keywords):
+        return False
+    
+    # Require minimum content length (filter out very short posts)
+    combined_text = title + ' ' + body
+    if len(combined_text) < 50:  # Minimum 50 characters
+        return False
+    
+    # Look for review indicators in the body
+    # If the body contains feedback-like content, it's more likely a review
+    review_indicators = ['class', 'professor', 'exam', 'grade', 'homework', 
+                        'easy', 'hard', 'difficult', 'helpful', 'lecture',
+                        'assignment', 'project', 'test', 'quiz', 'fair']
+    indicator_count = sum(1 for keyword in review_indicators if keyword in body)
+    
+    # If body is substantial and contains review keywords, likely a review
+    if len(body) > 100 and indicator_count >= 2:
+        return True
+    
+    # Default: reject unless it passes basic checks
+    return False
+
 def scrape_reddit(prof_name):
     reddit = praw.Reddit(
         client_id=REDDIT_CLIENT_ID,
@@ -53,14 +97,23 @@ def scrape_reddit(prof_name):
     conn = psycopg2.connect(**DB_CONFIG)
     cur = conn.cursor()
     professor_id = get_professor_id(cur, prof_name)
-    for submission in reddit.subreddit("UMD").search(prof_name, sort="new", limit=10):
-        text = submission.title + "\n" + submission.selftext
-        semester = "Unknown"
-        store_review(cur, professor_id, "reddit", text, semester)
+    
+    review_count = 0
+    searched_count = 0
+    
+    # Increase limit to 20 since we'll be filtering many out
+    for submission in reddit.subreddit("UMD").search(prof_name, sort="new", limit=20):
+        searched_count += 1
+        if is_likely_review(submission):
+            text = submission.title + "\n" + submission.selftext
+            semester = "Unknown"
+            store_review(cur, professor_id, "reddit", text, semester)
+            review_count += 1
+    
     conn.commit()
     cur.close()
     conn.close()
-    print(f"Fetched and stored Reddit reviews for {prof_name}")
+    print(f"Searched {searched_count} Reddit posts, stored {review_count} reviews for {prof_name}")
 
 def scrape_coursicle(prof_name):
     slug = prof_name.lower().replace(" ", "-")
@@ -93,19 +146,82 @@ def scrape_rmp(prof_name):
         command_executor='http://selenium:4444/wd/hub',
         options=options
     )
-    search_url = f"https://www.ratemyprofessors.com/search/professors/1112?q={prof_name.replace(' ', '%20')}"
+    # Fixed: Use UMD school ID (1270) instead of UIUC (1112)
+    search_url = f"https://www.ratemyprofessors.com/search/professors/1270?q={prof_name.replace(' ', '%20')}"
     driver.get(search_url)
     soup = BeautifulSoup(driver.page_source, "html.parser")
     prof_links = soup.find_all('a', href=True)
     prof_url = None
+    target_name_lower = prof_name.lower()
+    
+    # Add name validation to ensure correct professor
+    # Common name abbreviations for better matching
+    name_variations = {
+        'christopher': 'chris',
+        'chris': 'christopher',
+        'michael': 'mike',
+        'mike': 'michael',
+        'robert': 'rob',
+        'rob': 'robert',
+        'william': 'will',
+        'will': 'william',
+        'richard': 'rick',
+        'rick': 'richard',
+        'joseph': 'joe',
+        'joe': 'joseph'
+    }
+    
     for link in prof_links:
         if '/professor/' in link['href']:
-            prof_url = "https://www.ratemyprofessors.com" + link['href']
-            break
+            # Get the professor's name from the card - use 'CardName' not 'TeacherName'
+            parent = link.find_parent('div', class_=lambda x: x and 'TeacherCard' in x)
+            if parent:
+                name_elem = parent.find(class_=lambda x: x and 'CardName' in x)
+                if name_elem:
+                    displayed_name = name_elem.get_text(strip=True).lower()
+                    target_parts = target_name_lower.split()
+                    displayed_parts = displayed_name.split()
+                    
+                    # Check for exact match or fuzzy match with name variations
+                    match_found = False
+                    
+                    # Exact substring match
+                    if target_name_lower in displayed_name or displayed_name in target_name_lower:
+                        match_found = True
+                    # Check if all words from target appear in displayed (handles middle names, etc.)
+                    elif all(word in displayed_name for word in target_parts):
+                        match_found = True
+                    # Check for name abbreviations (Chris vs Christopher)
+                    elif len(target_parts) >= 2 and len(displayed_parts) >= 2:
+                        # Check if last names match and first names are variations
+                        if target_parts[-1] == displayed_parts[-1]:  # Last name match
+                            first_target = target_parts[0]
+                            first_displayed = displayed_parts[0]
+                            # Check if one is a known variation of the other
+                            if (first_target in name_variations and 
+                                name_variations[first_target] == first_displayed):
+                                match_found = True
+                            elif first_target == first_displayed:
+                                match_found = True
+                    
+                    if match_found:
+                        prof_url = "https://www.ratemyprofessors.com" + link['href']
+                        print(f"  → Matched professor: {name_elem.get_text(strip=True)}")
+                        break
+    
+    if not prof_url:
+        # Fallback: if no name match found, take first result (old behavior) but warn about it
+        for link in prof_links:
+            if '/professor/' in link['href']:
+                prof_url = "https://www.ratemyprofessors.com" + link['href']
+                print(f"  ⚠️ WARNING: No exact name match found, using first result")
+                break
+    
     if not prof_url:
         print(f"No RMP profile found for {prof_name}")
         driver.quit()
         return
+    
     driver.get(prof_url)
     soup = BeautifulSoup(driver.page_source, "html.parser")
     reviews = [r.get_text(strip=True) for r in soup.select('.Comments__StyledComments-dzzyvm-0')]
@@ -113,6 +229,7 @@ def scrape_rmp(prof_name):
         print(f"No RMP reviews found for {prof_name}")
         driver.quit()
         return
+    
     conn = psycopg2.connect(**DB_CONFIG)
     cur = conn.cursor()
     professor_id = get_professor_id(cur, prof_name)

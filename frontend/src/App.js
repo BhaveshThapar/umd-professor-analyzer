@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 
 function App() {
   const [query, setQuery] = useState("");
@@ -8,6 +8,8 @@ function App() {
   const [notFound, setNotFound] = useState(false);
   const [sourcesFound, setSourcesFound] = useState(null);
   const [noData, setNoData] = useState(false);
+  const [scrapingInProgress, setScrapingInProgress] = useState(false);
+  const [pollingForResults, setPollingForResults] = useState(false);
   const [qaQuestion, setQaQuestion] = useState("");
   const [qaAnswer, setQaAnswer] = useState("");
   const [qaLoading, setQaLoading] = useState(false);
@@ -20,18 +22,25 @@ function App() {
     setNotFound(false);
     setSourcesFound(null);
     setNoData(false);
+    setScrapingInProgress(false);
+    setQaQuestion("");  // Reset Q&A question
+    setQaAnswer("");    // Reset Q&A answer
     try {
       const res = await fetch(`http://localhost:8080/professors/${encodeURIComponent(query)}`);
       if (!res.ok) throw new Error("Professor not found");
       const data = await res.json();
       setSourcesFound(data.sources_found || null);
       setNoData(data.no_data || false);
-      if (data.no_data) {
-        setNotFound(true);
-        setProfessor(null);
-      } else {
+      setScrapingInProgress(data.scraping_in_progress || false);
+      // Show professor if we have planetterp data OR reviews
+      const hasPlanetterpData = data.planetterp && data.planetterp !== null;
+      const hasReviews = !data.no_data;
+      if (hasPlanetterpData || hasReviews) {
         setProfessor(data);
         setNotFound(false);
+      } else {
+        setNotFound(true);
+        setProfessor(null);
       }
     } catch (err) {
       setError(err.message || "Error fetching professor");
@@ -39,6 +48,7 @@ function App() {
       setProfessor(null);
       setSourcesFound(null);
       setNoData(false);
+      setScrapingInProgress(false);
     } finally {
       setLoading(false);
     }
@@ -64,12 +74,65 @@ function App() {
     }
   };
 
+  // Auto-refresh polling when scraping is in progress
+  useEffect(() => {
+    if (scrapingInProgress && query.trim()) {
+      setPollingForResults(true);
+
+      const pollInterval = setInterval(async () => {
+        try {
+          const res = await fetch(`http://localhost:8080/professors/${encodeURIComponent(query)}`);
+          if (!res.ok) return;
+
+          const data = await res.json();
+
+          // If scraping is no longer in progress and we have data, update the UI
+          if (!data.scraping_in_progress && !data.no_data) {
+            setSourcesFound(data.sources_found || null);
+            setNoData(data.no_data || false);
+            setScrapingInProgress(false);
+            setPollingForResults(false);
+            setProfessor(data);
+            clearInterval(pollInterval);
+          }
+        } catch (err) {
+          console.error("Polling error:", err);
+        }
+      }, 5000); // Poll every 5 seconds
+
+      // Cleanup: stop polling after 60 seconds to prevent infinite polling
+      const timeout = setTimeout(() => {
+        clearInterval(pollInterval);
+        setPollingForResults(false);
+      }, 60000);
+
+      return () => {
+        clearInterval(pollInterval);
+        clearTimeout(timeout);
+      };
+    }
+  }, [scrapingInProgress, query]);
+
   const renderSourcesStatus = () => {
     if (!sourcesFound) return null;
     const available = Object.entries(sourcesFound).filter(([k, v]) => v).map(([k]) => k);
     const missing = Object.entries(sourcesFound).filter(([k, v]) => !v).map(([k]) => k);
+
     if (available.length === 0) {
-      return <div className="text-red-500 text-sm mb-2">No reviews found from Reddit, Coursicle, or RMP.</div>;
+      return (
+        <div>
+          <div className="text-red-500 text-sm mb-2">No reviews found from Reddit, Coursicle, or RMP.</div>
+          {scrapingInProgress && (
+            <div className="bg-blue-100 border border-blue-300 rounded p-3 text-sm text-blue-800 mb-2">
+              <span className="font-semibold">🔄 Scraping reviews now...</span>
+              <br />
+              {pollingForResults
+                ? "Results will appear automatically when ready (checking every 5 seconds)..."
+                : "Please refresh this page in 10-30 seconds to see results!"}
+            </div>
+          )}
+        </div>
+      );
     }
     if (missing.length > 0) {
       return (
@@ -129,6 +192,15 @@ function App() {
               <h3 className="text-xl font-semibold text-purple-800">{professor.name}</h3>
               <p className="text-gray-600 mb-2">Department: {professor.department}</p>
               {renderSourcesStatus()}
+              {scrapingInProgress && (
+                <div className="bg-blue-100 border border-blue-300 rounded p-3 text-sm text-blue-800 mb-3">
+                  <span className="font-semibold">🔄 Scraping reviews now...</span>
+                  <br />
+                  {pollingForResults
+                    ? "Results will appear automatically when ready (checking every 5 seconds)..."
+                    : "Please refresh this page in 10-30 seconds to see results!"}
+                </div>
+              )}
               {isRealTags(professor.tags) ? (
                 <div className="flex flex-wrap gap-2 mb-2">
                   {professor.tags.map(tag => (
@@ -175,7 +247,7 @@ function App() {
                   ))}
                 </ul>
               </details>
-              {}
+              { }
               <div className="mt-4 mb-2">
                 <div className="font-semibold text-sm text-gray-700 mb-1">Ask a question about this professor:</div>
                 <div className="flex gap-2 mb-2">

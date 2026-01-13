@@ -19,8 +19,12 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/umdprof
       SPRING_DATASOURCE_USERNAME: umdprof
       SPRING_DATASOURCE_PASSWORD: umdprof
+      COMPOSE_PROJECT_NAME: umd-professor-analyzer
     ports:
       - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./docker-compose.yml:/app/docker-compose.yml:ro
     depends_on:
       - db
     networks:
@@ -37,6 +41,7 @@ services:
 
   scrapers:
     build: ./scrapers
+    entrypoint: [ "/bin/sh", "-c", "tail -f /dev/null" ]
     depends_on:
       - db
       - selenium
@@ -48,7 +53,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
     networks:
       - umdnet
 
