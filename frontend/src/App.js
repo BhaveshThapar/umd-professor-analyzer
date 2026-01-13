@@ -1,5 +1,9 @@
 import React, { useState, useEffect } from "react";
 
+// Use environment variables for API URLs, fallback to localhost for development
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
+const NLP_URL = process.env.REACT_APP_NLP_URL || 'http://localhost:8000';
+
 function App() {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -26,7 +30,7 @@ function App() {
     setQaQuestion("");  // Reset Q&A question
     setQaAnswer("");    // Reset Q&A answer
     try {
-      const res = await fetch(`http://localhost:8080/professors/${encodeURIComponent(query)}`);
+      const res = await fetch(`${API_URL}/professors/${encodeURIComponent(query)}`);
       if (!res.ok) throw new Error("Professor not found");
       const data = await res.json();
       setSourcesFound(data.sources_found || null);
@@ -59,7 +63,7 @@ function App() {
     setQaLoading(true);
     setQaAnswer("");
     try {
-      const res = await fetch(`http://localhost:8000/qa`, {
+      const res = await fetch(`${NLP_URL}/qa`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reviews: professor.raw_reviews, question: qaQuestion })
@@ -81,7 +85,7 @@ function App() {
 
       const pollInterval = setInterval(async () => {
         try {
-          const res = await fetch(`http://localhost:8080/professors/${encodeURIComponent(query)}`);
+          const res = await fetch(`${API_URL}/professors/${encodeURIComponent(query)}`);
           if (!res.ok) return;
 
           const data = await res.json();
